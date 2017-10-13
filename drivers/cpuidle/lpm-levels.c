@@ -107,6 +107,8 @@ module_param_named(
 
 static uint32_t ref_premature_cnt = 1;
 
+static uint32_t ref_premature_cnt = 1;
+
 struct lpm_history {
 	uint32_t resi[MAXSAMPLES];
 	int mode[MAXSAMPLES];
