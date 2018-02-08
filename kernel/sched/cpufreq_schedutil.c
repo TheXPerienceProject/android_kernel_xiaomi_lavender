@@ -26,9 +26,13 @@ unsigned long boosted_cpu_util(int cpu);
 #define cpufreq_driver_fast_switch(x, y) 0
 #define cpufreq_enable_fast_switch(x)
 #define cpufreq_disable_fast_switch(x)
+<<<<<<< HEAD
 #define UP_RATE_LIMIT_US			(500)
 #define DOWN_RATE_LIMIT_US			(20000)
 #define SUGOV_KTHREAD_PRIORITY	50
+=======
+#define LATENCY_MULTIPLIER			(1000)
+>>>>>>> 17b417188d63... sched/cpufreq: Remove unused SUGOV_KTHREAD_PRIORITY macro
 
 struct sugov_tunables {
 	struct gov_attr_set attr_set;
