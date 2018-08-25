@@ -14360,6 +14360,8 @@ static void hdd_driver_unload(void)
 	hdd_qdf_print_deinit();
 }
 
+static struct work_struct boot_work;
+
 /**
  * hdd_module_init() - Module init helper
  *
@@ -14367,10 +14369,20 @@ static void hdd_driver_unload(void)
  *
  * Return: 0 for success, errno on failure
  */
-static int hdd_module_init(void)
+static void hdd_module_init_work(struct work_struct *work)
 {
-	if (hdd_driver_load())
-		return -EINVAL;
+	if (hdd_driver_load()) {
+		pr_err("%s: init failed\n", __func__);
+		return;
+	}
+	pr_info("%s: init passed\n", __func__);
+}
+
+
+static int __init hdd_module_init(void)
+{
+	INIT_WORK(&boot_work, hdd_module_init_work);
+	schedule_work(&boot_work);
 
 	return 0;
 }
@@ -16497,7 +16509,7 @@ wlan_hdd_add_monitor_check(struct hdd_context *hdd_ctx,
 }
 #endif /* WLAN_FEATURE_PKT_CAPTURE */
 /* Register the module init/exit functions */
-module_init(hdd_module_init);
+device_initcall(hdd_module_init);
 module_exit(hdd_module_exit);
 
 MODULE_LICENSE("Dual BSD/GPL");
