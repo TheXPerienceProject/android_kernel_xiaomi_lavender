@@ -837,6 +837,15 @@ static int sugov_init(struct cpufreq_policy *policy)
                 }
 	}
 
+<<<<<<< HEAD
+=======
+        /* Hard-code some sane rate-limit values */
+        tunables->up_rate_limit_us = 5000;
+        tunables->down_rate_limit_us = 20000;
+
+	tunables->iowait_boost_enable = true;
+
+>>>>>>> f61262d8d01f... cpufreq: schedutil: Enable iowait boost
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
 	stale_ns = walt_ravg_window + (walt_ravg_window >> 3);
