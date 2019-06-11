@@ -28,9 +28,7 @@
 #include "sched.h"
 #include "tune.h"
 
-#ifdef CONFIG_SCHED_WALT
 unsigned long boosted_cpu_util(int cpu);
-#endif
 
 /* Stub out fast switch routines present on mainline to reduce the backport
  * overhead. */
@@ -43,7 +41,6 @@ struct algov_tunables {
 	struct gov_attr_set attr_set;
 	unsigned int up_rate_limit_us;
 	unsigned int down_rate_limit_us;
-	bool pl;
 	bool iowait_boost_enable;
 };
 
@@ -95,22 +92,36 @@ struct algov_cpu {
 
 static DEFINE_PER_CPU(struct algov_cpu, algov_cpu);
 static DEFINE_PER_CPU(struct algov_tunables *, cached_tunables);
+static unsigned int stale_ns;
 
 /************************ Governor internals ***********************/
 
 static bool algov_should_update_freq(struct algov_policy *sg_policy, u64 time)
 {
-	struct cpufreq_policy *policy = sg_policy->policy;
-	s64 delta_ns, min_rate_limit_ns;
-	unsigned long flags;
+	s64 delta_ns;
 
-	if (unlikely(sg_policy->need_freq_update)){
-		sg_policy->need_freq_update = false;
-		sg_policy->next_freq = UINT_MAX;
+	/*
+	 * Since cpufreq_update_util() is called with rq->lock held for
+	 * the @target_cpu, our per-cpu data is fully serialized.
+	 *
+	 * However, drivers cannot in general deal with cross-cpu
+	 * requests, so while get_next_freq() will work, our
+	 * algov_update_commit() call may not for the fast switching platforms.
+	 *
+	 * Hence stop here for remote requests if they aren't supported
+	 * by the hardware, as calculating the frequency is pointless if
+	 * we cannot in fact act on it.
+	 *
+	 * For the slow switching platforms, the kthread is always scheduled on
+	 * the right set of CPUs and any CPU can find the next frequency and
+	 * schedule the kthread.
+	 */
+	if (sg_policy->policy->fast_switch_enabled &&
+	    !cpufreq_this_cpu_can_update(sg_policy->policy))
+		return false;
+
+	if (unlikely(sg_policy->need_freq_update))
 		return true;
-	}
-	
-		sg_policy->next_freq = policy->cur;//set next_freq will be set of current policy
 
 	delta_ns = time - sg_policy->last_freq_update_time;
 
@@ -136,35 +147,50 @@ static bool algov_up_down_rate_limit(struct algov_policy *sg_policy, u64 time,
 	return false;
 }
 
-static void algov_update_commit(struct algov_policy *sg_policy, u64 time,
-				unsigned int next_freq)
+static bool algov_update_next_freq(struct algov_policy *sg_policy, u64 time,
+				   unsigned int next_freq)
 {
-	struct cpufreq_policy *policy = sg_policy->policy;
-
-	if (algov_up_down_rate_limit(sg_policy, time, next_freq)) {
-		/* Reset cached freq as next_freq isn't changed */
-		sg_policy->cached_raw_freq = 0;
-		return;
-	}
+        if (algov_up_down_rate_limit(sg_policy, time, next_freq)) {
+                /* Reset cached freq as next_freq isn't changed */
+                sg_policy->cached_raw_freq = 0;
+                return false;
+        }
 
 	if (sg_policy->next_freq == next_freq)
-		return;
+		return false;
 
-	//Reduce frequencies slower
 	if (sg_policy->next_freq > next_freq)
 		next_freq = (sg_policy->next_freq + next_freq) >> 1;
 
 	sg_policy->next_freq = next_freq;
 	sg_policy->last_freq_update_time = time;
 
-	if (policy->fast_switch_enabled) {
-		next_freq = cpufreq_driver_fast_switch(policy, next_freq);
-		if (next_freq == CPUFREQ_ENTRY_INVALID)
-			return;
+	return true;
+}
 
-		policy->cur = next_freq;
-		trace_cpu_frequency(next_freq, smp_processor_id());
-	} else if (!sg_policy->work_in_progress) {
+static void algov_fast_switch(struct algov_policy *sg_policy, u64 time,
+			      unsigned int next_freq)
+{
+	struct cpufreq_policy *policy = sg_policy->policy;
+
+	if (!algov_update_next_freq(sg_policy, time, next_freq))
+		return;
+
+	next_freq = cpufreq_driver_fast_switch(policy, next_freq);
+	if (!next_freq)
+		return;
+
+	policy->cur = next_freq;
+	trace_cpu_frequency(next_freq, smp_processor_id());
+}
+
+static void algov_deferred_update(struct algov_policy *sg_policy, u64 time,
+				  unsigned int next_freq)
+{
+	if (!algov_update_next_freq(sg_policy, time, next_freq))
+		return;
+
+	if (!sg_policy->work_in_progress) {
 		sg_policy->work_in_progress = true;
 		irq_work_queue(&sg_policy->irq_work);
 	}
@@ -197,10 +223,9 @@ static unsigned int get_next_freq(struct algov_policy *sg_policy,
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned int freq = arch_scale_freq_invariant() ?
-				policy->max : policy->cur;
+				policy->cpuinfo.max_freq : policy->cur;
 
 	freq = (freq + (freq >> 2)) * util / max;
-	trace_algov_next_freq(policy->cpu, util, max, freq);
 
 	if (freq == sg_policy->cached_raw_freq && !sg_policy->need_freq_update)
 		return sg_policy->next_freq;
@@ -219,9 +244,8 @@ static inline bool use_pelt(void)
 #endif
 }
 
-static void algov_get_util(unsigned long *util, unsigned long *max, u64 time)
+static void algov_get_util(unsigned long *util, unsigned long *max, u64 time, int cpu)
 {
-	int cpu = smp_processor_id();
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long max_cap, rt;
 	s64 delta;
@@ -236,7 +260,7 @@ static void algov_get_util(unsigned long *util, unsigned long *max, u64 time)
 	rt = (rt * max_cap) >> SCHED_CAPACITY_SHIFT;
 
 	*util = boosted_cpu_util(cpu);
-	if (likely(use_pelt()))
+	if (use_pelt())
 		*util = *util + rt;
 
 	*util = min(*util, max_cap);
@@ -326,9 +350,6 @@ static void algov_update_single(struct update_util_data *hook, u64 time,
 	unsigned int next_f;
 	bool busy;
 
-	if (!sg_policy->tunables->pl && flags & SCHED_CPUFREQ_PL)
-		return;
-
 	algov_set_iowait_boost(sg_cpu, time);
 	sg_cpu->last_update = time;
 
@@ -342,26 +363,39 @@ static void algov_update_single(struct update_util_data *hook, u64 time,
 	if (!algov_should_update_freq(sg_policy, time))
 		return;
 
-	busy = algov_cpu_is_busy(sg_cpu);
+	busy = use_pelt() && algov_cpu_is_busy(sg_cpu);
 
 	if (flags & SCHED_CPUFREQ_DL) {
 		next_f = policy->cpuinfo.max_freq;
 	} else {
-		algov_get_util(&util, &max, time);
+		algov_get_util(&util, &max, time, sg_cpu->cpu);
 		algov_iowait_boost(sg_cpu, &util, &max);
 		next_f = get_next_freq(sg_policy, util, max);
 		/*
 		 * Do not reduce the frequency if the CPU has not been idle
 		 * recently, as the reduction is likely to be premature then.
 		 */
-		if (busy && next_f < sg_policy->next_freq) {
+		if (busy && next_f < sg_policy->next_freq &&
+		    sg_policy->next_freq != UINT_MAX) {
 			next_f = sg_policy->next_freq;
 
 			/* Reset cached freq as next_freq has changed */
 			sg_policy->cached_raw_freq = 0;
 		}
 	}
-	algov_update_commit(sg_policy, time, next_f);
+
+	/*
+	 * This code runs under rq->lock for the target CPU, so it won't run
+	 * concurrently on two different CPUs for the same target and it is not
+	 * necessary to acquire the lock in the fast switch case.
+	 */
+	if (sg_policy->policy->fast_switch_enabled) {
+		algov_fast_switch(sg_policy, time, next_f);
+	} else {
+		raw_spin_lock(&sg_policy->update_lock);
+		algov_deferred_update(sg_policy, time, next_f);
+		raw_spin_unlock(&sg_policy->update_lock);
+	}
 }
 
 static unsigned int algov_next_freq_shared(struct algov_cpu *sg_cpu, u64 time)
@@ -384,7 +418,7 @@ static unsigned int algov_next_freq_shared(struct algov_cpu *sg_cpu, u64 time)
 		 * idle now (and clear iowait_boost for it).
 		 */
 		delta_ns = time - j_sg_cpu->last_update;
-		if (delta_ns > TICK_NSEC) {
+		if (delta_ns > stale_ns) {
 			j_sg_cpu->iowait_boost = 0;
 			j_sg_cpu->iowait_boost_pending = false;
 			continue;
@@ -413,16 +447,13 @@ static void algov_update_shared(struct update_util_data *hook, u64 time,
 	unsigned long util, max;
 	unsigned int next_f;
 
-	algov_get_util(&util, &max, time);
+	algov_get_util(&util, &max, time, sg_cpu->cpu);
 
 	raw_spin_lock(&sg_policy->update_lock);
 
 	sg_cpu->util = util;
 	sg_cpu->max = max;
 	sg_cpu->flags = flags;
-
-	if (!sg_policy->tunables->pl && flags & SCHED_CPUFREQ_PL)
-		return;
 
 	algov_set_iowait_boost(sg_cpu, time);
 	sg_cpu->last_update = time;
@@ -433,7 +464,10 @@ static void algov_update_shared(struct update_util_data *hook, u64 time,
 		else
 			next_f = algov_next_freq_shared(sg_cpu, time);
 
-		algov_update_commit(sg_policy, time, next_f);
+		if (sg_policy->policy->fast_switch_enabled)
+			algov_fast_switch(sg_policy, time, next_f);
+		else
+			algov_deferred_update(sg_policy, time, next_f);
 	}
 
 	raw_spin_unlock(&sg_policy->update_lock);
@@ -448,11 +482,11 @@ static void algov_work(struct kthread_work *work)
 	/*
 	 * Hold sg_policy->update_lock shortly to handle the case where:
 	 * incase sg_policy->next_freq is read here, and then updated by
-	 * algov_update_shared just before work_in_progress is set to false
+	 * algov_deferred_update() just before work_in_progress is set to false
 	 * here, we may miss queueing the new update.
 	 *
 	 * Note: If a work was queued after the update_lock is released,
-	 * algov_work will just be called again by kthread_work code; and the
+	 * algov_work() will just be called again by kthread_work code; and the
 	 * request will be proceed before the algov thread sleeps.
 	 */
 	raw_spin_lock_irqsave(&sg_policy->update_lock, flags);
@@ -511,7 +545,7 @@ static ssize_t up_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
 {
 	struct algov_tunables *tunables = to_algov_tunables(attr_set);
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", tunables->up_rate_limit_us);
+        return scnprintf(buf, PAGE_SIZE, "%u\n", tunables->up_rate_limit_us);
 }
 
 static ssize_t down_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
@@ -527,6 +561,9 @@ static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 	struct algov_tunables *tunables = to_algov_tunables(attr_set);
 	struct algov_policy *sg_policy;
 	unsigned int rate_limit_us;
+
+	/* Don't let userspace change this */
+	return count;
 
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
@@ -548,6 +585,9 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 	struct algov_policy *sg_policy;
 	unsigned int rate_limit_us;
 
+	/* Don't let userspace change this */
+	return count;
+
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
 
@@ -561,6 +601,9 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
+static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
+static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
+
 static ssize_t iowait_boost_enable_show(struct gov_attr_set *attr_set,
 					char *buf)
 {
@@ -573,7 +616,7 @@ static ssize_t iowait_boost_enable_store(struct gov_attr_set *attr_set,
 					 const char *buf, size_t count)
 {
 	struct algov_tunables *tunables = to_algov_tunables(attr_set);
-	bool enable=true;
+	bool enable;
 
 	if (kstrtobool(buf, &enable))
 		return -EINVAL;
@@ -583,8 +626,6 @@ static ssize_t iowait_boost_enable_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
-static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
-static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
 static struct governor_attr iowait_boost_enable = __ATTR_RW(iowait_boost_enable);
 
 static struct attribute *algov_attributes[] = {
@@ -600,7 +641,7 @@ static struct kobj_type algov_tunables_ktype = {
 };
 
 /********************** cpufreq governor interface *********************/
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDALESSA
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_schedalessa
 static
 #endif
 struct cpufreq_governor cpufreq_gov_schedalessa;
@@ -644,10 +685,10 @@ static int algov_kthread_create(struct algov_policy *sg_policy)
 		return PTR_ERR(thread);
 	}
 
-	ret = sched_setscheduler_nocheck(thread, SCHED_FIFO, &param);
+	ret = sched_setscheduler_nocheck(thread, SCHED_RR, &param);
 	if (ret) {
 		kthread_stop(thread);
-		pr_warn("%s: failed to set SCHED_RR\n", __func__);
+		pr_warn("%s: failed to set SCHED_FIFO\n", __func__);
 		return ret;
 	}
 
@@ -691,10 +732,10 @@ static void algov_tunables_save(struct cpufreq_policy *policy,
 	int cpu;
 	struct algov_tunables *cached = per_cpu(cached_tunables, policy->cpu);
 
- 	if (!have_governor_per_policy())
+	if (!have_governor_per_policy())
 		return;
 
- 	if (!cached) {
+	if (!cached) {
 		cached = kzalloc(sizeof(*tunables), GFP_KERNEL);
 		if (!cached) {
 			pr_warn("Couldn't allocate tunables for caching\n");
@@ -704,7 +745,7 @@ static void algov_tunables_save(struct cpufreq_policy *policy,
 			per_cpu(cached_tunables, cpu) = cached;
 	}
 
- 	cached->up_rate_limit_us = tunables->up_rate_limit_us;
+	cached->up_rate_limit_us = tunables->up_rate_limit_us;
 	cached->down_rate_limit_us = tunables->down_rate_limit_us;
 }
 
@@ -722,10 +763,10 @@ static void algov_tunables_restore(struct cpufreq_policy *policy)
 	struct algov_tunables *tunables = sg_policy->tunables;
 	struct algov_tunables *cached = per_cpu(cached_tunables, policy->cpu);
 
- 	if (!cached)
+	if (!cached)
 		return;
 
- 	tunables->up_rate_limit_us = cached->up_rate_limit_us;
+	tunables->up_rate_limit_us = cached->up_rate_limit_us;
 	tunables->down_rate_limit_us = cached->down_rate_limit_us;
 	sg_policy->up_rate_delay_ns =
 		tunables->up_rate_limit_us * NSEC_PER_USEC;
@@ -784,19 +825,25 @@ static int algov_init(struct cpufreq_policy *policy)
 		unsigned int lat;
 
                 tunables->up_rate_limit_us = LATENCY_MULTIPLIER;
-				tunables->down_rate_limit_us = LATENCY_MULTIPLIER;
-				lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
+                tunables->down_rate_limit_us = LATENCY_MULTIPLIER;
+		lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
 		if (lat) {
-                tunables->up_rate_limit_us *= lat;
-                tunables->down_rate_limit_us *= lat;
-		}
+                        tunables->up_rate_limit_us *= lat;
+                        tunables->down_rate_limit_us *= lat;
+                }
 	}
 
-	tunables->iowait_boost_enable = policy->iowait_boost_enable;
+        /* Hard-code some sane rate-limit values */
+        tunables->up_rate_limit_us = 5000;
+        tunables->down_rate_limit_us = 20000;
+
+	tunables->iowait_boost_enable = false;
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
-    algov_tunables_restore(policy);
+	stale_ns = walt_ravg_window + (walt_ravg_window >> 3);
+
+	algov_tunables_restore(policy);
 
 	ret = kobject_init_and_add(&tunables->attr_set.kobj, &algov_tunables_ktype,
 				   get_governor_parent_kobj(policy), "%s",
@@ -809,6 +856,7 @@ out:
 	return 0;
 
 fail:
+	kobject_put(&tunables->attr_set.kobj);
 	policy->governor_data = NULL;
 	algov_tunables_free(tunables);
 
@@ -832,6 +880,8 @@ static int algov_exit(struct cpufreq_policy *policy)
 	struct algov_policy *sg_policy = policy->governor_data;
 	struct algov_tunables *tunables = sg_policy->tunables;
 	unsigned int count;
+
+	cpufreq_disable_fast_switch(policy);
 
 	mutex_lock(&global_tunables_lock);
 
@@ -872,6 +922,7 @@ static int algov_start(struct cpufreq_policy *policy)
 
 		memset(sg_cpu, 0, sizeof(*sg_cpu));
 		sg_cpu->sg_policy = sg_policy;
+		sg_cpu->cpu = cpu;
 		sg_cpu->flags = SCHED_CPUFREQ_DL;
 		sg_cpu->iowait_boost_max = policy->cpuinfo.max_freq;
 	}

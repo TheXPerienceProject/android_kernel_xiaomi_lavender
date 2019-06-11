@@ -16,6 +16,7 @@
 #include <linux/completion.h>
 #include <linux/kobject.h>
 #include <linux/notifier.h>
+#include <linux/smp.h>
 #include <linux/spinlock.h>
 #include <linux/sysfs.h>
 
