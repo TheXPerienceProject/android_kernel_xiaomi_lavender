@@ -26,18 +26,13 @@ unsigned long boosted_cpu_util(int cpu);
 #define cpufreq_driver_fast_switch(x, y) 0
 #define cpufreq_enable_fast_switch(x)
 #define cpufreq_disable_fast_switch(x)
-<<<<<<< HEAD
-#define UP_RATE_LIMIT_US			(500)
-#define DOWN_RATE_LIMIT_US			(20000)
-#define SUGOV_KTHREAD_PRIORITY	50
-=======
 #define LATENCY_MULTIPLIER			(1000)
->>>>>>> 17b417188d63... sched/cpufreq: Remove unused SUGOV_KTHREAD_PRIORITY macro
 
 struct sugov_tunables {
 	struct gov_attr_set attr_set;
 	unsigned int up_rate_limit_us;
 	unsigned int down_rate_limit_us;
+	bool iowait_boost_enable;
 };
 
 struct sugov_policy {
@@ -265,9 +260,6 @@ static void sugov_get_util(unsigned long *util, unsigned long *max, u64 time, in
 
 static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time)
 {
-
-	if (flags & SCHED_CPUFREQ_IOWAIT) {
-=======
 	struct sugov_policy *sg_policy = sg_cpu->sg_policy;
 
 	if (!sg_policy->tunables->iowait_boost_enable)
@@ -284,7 +276,6 @@ static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time)
 	}
 
 	if (sg_cpu->flags & SCHED_CPUFREQ_IOWAIT) {
->>>>>>> f02229057a27... sched/cpufreq: Don't pass flags to sugov_set_iowait_boost()
 		if (sg_cpu->iowait_boost_pending)
 			return;
 
@@ -296,14 +287,6 @@ static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time)
 				sg_cpu->iowait_boost = sg_cpu->iowait_boost_max;
 		} else {
 			sg_cpu->iowait_boost = sg_cpu->sg_policy->policy->min;
-		}
-	} else if (sg_cpu->iowait_boost) {
-		s64 delta_ns = time - sg_cpu->last_update;
-
-		/* Clear iowait_boost if the CPU apprears to have been idle. */
-		if (delta_ns > TICK_NSEC) {
-			sg_cpu->iowait_boost = 0;
-			sg_cpu->iowait_boost_pending = false;
 		}
 	}
 }
@@ -570,6 +553,9 @@ static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 	struct sugov_policy *sg_policy;
 	unsigned int rate_limit_us;
 
+	/* Don't let userspace change this */
+	return count;
+
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
 
@@ -590,6 +576,9 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 	struct sugov_policy *sg_policy;
 	unsigned int rate_limit_us;
 
+	/* Don't let userspace change this */
+	return count;
+
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
 
@@ -606,8 +595,6 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
 static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
 
-<<<<<<< HEAD
-=======
 static ssize_t iowait_boost_enable_show(struct gov_attr_set *attr_set,
 					char *buf)
 {
@@ -632,10 +619,10 @@ static ssize_t iowait_boost_enable_store(struct gov_attr_set *attr_set,
 
 static struct governor_attr iowait_boost_enable = __ATTR_RW(iowait_boost_enable);
 
->>>>>>> adfcb87049ca... cpufreq: schedutil: Switch from sprintf to scnprintf
 static struct attribute *sugov_attributes[] = {
 	&up_rate_limit_us.attr,
 	&down_rate_limit_us.attr,
+	&iowait_boost_enable.attr,
 	NULL
 };
 
@@ -828,8 +815,8 @@ static int sugov_init(struct cpufreq_policy *policy)
 	} else {
 		unsigned int lat;
 
-                tunables->up_rate_limit_us = UP_RATE_LIMIT_US;
-                tunables->down_rate_limit_us = DOWN_RATE_LIMIT_US;
+                tunables->up_rate_limit_us = LATENCY_MULTIPLIER;
+                tunables->down_rate_limit_us = LATENCY_MULTIPLIER;
 		lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
 		if (lat) {
                         tunables->up_rate_limit_us *= lat;
@@ -837,15 +824,12 @@ static int sugov_init(struct cpufreq_policy *policy)
                 }
 	}
 
-<<<<<<< HEAD
-=======
         /* Hard-code some sane rate-limit values */
         tunables->up_rate_limit_us = 5000;
         tunables->down_rate_limit_us = 20000;
 
 	tunables->iowait_boost_enable = false;
 
->>>>>>> f61262d8d01f... cpufreq: schedutil: Enable iowait boost
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
 	stale_ns = walt_ravg_window + (walt_ravg_window >> 3);
