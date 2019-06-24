@@ -641,7 +641,7 @@ static struct kobj_type algov_tunables_ktype = {
 };
 
 /********************** cpufreq governor interface *********************/
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_schedalessa
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDALESSA
 static
 #endif
 struct cpufreq_governor cpufreq_gov_schedalessa;
