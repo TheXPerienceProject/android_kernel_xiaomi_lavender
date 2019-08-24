@@ -390,6 +390,7 @@ static void msm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
 				 encoder->base.id, encoder->name);
 
 		drm_bridge_enable(encoder->bridge);
+
 	}
 	SDE_ATRACE_END("msm_enable");
 }

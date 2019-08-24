@@ -153,6 +153,11 @@ static long sdcardfs_compat_ioctl(struct file *file, unsigned int cmd,
 		goto out;
 
 	/* save current_cred and override it */
+	saved_cred = override_fsids(sbi, SDCARDFS_I(file_inode(file))->data);
+	if (!saved_cred) {
+		err = -ENOMEM;
+		goto out;
+	}
 
 	saved_cred = override_fsids(sbi, SDCARDFS_I(file_inode(file))->data);
 	if (!saved_cred) {
@@ -254,6 +259,7 @@ static int sdcardfs_open(struct inode *inode, struct file *file)
 		err = -ENOMEM;
 		goto out_err;
 	}
+
 	file->private_data =
 		kzalloc(sizeof(struct sdcardfs_file_info), GFP_KERNEL);
 	if (!SDCARDFS_F(file)) {
