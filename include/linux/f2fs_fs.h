@@ -116,12 +116,9 @@ struct f2fs_super_block {
 /*
  * For checkpoint
  */
-<<<<<<< HEAD
 #define CP_DISABLED_QUICK_FLAG		0x00002000
 #define CP_DISABLED_FLAG		0x00001000
 #define CP_QUOTA_NEED_FSCK_FLAG		0x00000800
-=======
->>>>>>> nathan/kernel.lnx.4.4.r34-rel
 #define CP_LARGE_NAT_BITMAP_FLAG	0x00000400
 #define CP_NOCRC_RECOVERY_FLAG	0x00000200
 #define CP_TRIMMED_FLAG		0x00000100
