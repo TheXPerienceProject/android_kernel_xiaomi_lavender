@@ -602,9 +602,6 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
-static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
-static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
-
 static ssize_t iowait_boost_enable_show(struct gov_attr_set *attr_set,
 					char *buf)
 {
@@ -627,6 +624,8 @@ static ssize_t iowait_boost_enable_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
+static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
+static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
 static struct governor_attr iowait_boost_enable = __ATTR_RW(iowait_boost_enable);
 
 static struct attribute *algov_attributes[] = {
@@ -806,6 +805,9 @@ static int algov_init(struct cpufreq_policy *policy)
 			ret = -EINVAL;
 			goto stop_kthread;
 		}
+
+	    tunables->iowait_boost_enable = policy->iowait_boost_enable;
+
 		policy->governor_data = sg_policy;
 		sg_policy->tunables = global_tunables;
 
