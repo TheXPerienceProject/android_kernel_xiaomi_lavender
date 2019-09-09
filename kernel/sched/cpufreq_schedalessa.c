@@ -16,6 +16,8 @@
  * - Add trace point for get_next_freq
  * - Avoid processing certain notifications
  * - Return to FIFO
+ * v2.3 
+ * - Implement Energy Model
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -24,6 +26,7 @@
 #include <linux/kthread.h>
 #include <linux/slab.h>
 #include <trace/events/power.h>
+#include <linux/energy_model.h>
 
 #include "sched.h"
 #include "tune.h"
@@ -68,6 +71,9 @@ struct algov_policy {
 	bool work_in_progress;
 
 	bool need_freq_update;
+#ifdef CONFIG_ENERGY_MODEL
+	struct em_perf_domain *pd;
+#endif
 };
 
 struct algov_cpu {
@@ -88,6 +94,7 @@ struct algov_cpu {
 	/* The field below is for single-CPU policies only. */
 #ifdef CONFIG_NO_HZ_COMMON
 	unsigned long saved_idle_calls;
+	unsigned long		previous_util;
 #endif
 };
 
@@ -96,6 +103,39 @@ static DEFINE_PER_CPU(struct algov_tunables *, cached_tunables);
 static unsigned int stale_ns;
 
 /************************ Governor internals ***********************/
+
+#ifdef CONFIG_ENERGY_MODEL
+static void algov_policy_attach_pd(struct algov_policy *sg_policy)
+{
+	struct em_perf_domain *pd;
+	struct cpufreq_policy *policy = sg_policy->policy;
+
+	sg_policy->pd = NULL;
+	pd = em_cpu_get(policy->cpu);
+	if (!pd)
+		return;
+
+	if (cpumask_equal(policy->related_cpus, to_cpumask(pd->cpus)))
+		sg_policy->pd = pd;
+	else
+		pr_warn("%s: Not all CPUs in schedutil policy %u share the same perf domain, no perf domain for that policy will be registered\n",
+			__func__, policy->cpu);
+}
+
+static struct em_perf_domain *algov_policy_get_pd(
+						struct algov_policy *sg_policy)
+{
+	return sg_policy->pd;
+}
+#else /* CONFIG_ENERGY_MODEL */
+static void algov_policy_attach_pd(struct algov_policy *sg_policy) {}
+static struct em_perf_domain *algov_policy_get_pd(
+						struct algov_policy *sg_policy)
+{
+	return NULL;
+}
+#endif /* CONFIG_ENERGY_MODEL */
+
 
 static bool algov_should_update_freq(struct algov_policy *sg_policy, u64 time)
 {
@@ -197,11 +237,53 @@ static void algov_deferred_update(struct algov_policy *sg_policy, u64 time,
 	}
 }
 
+#ifdef CONFIG_NO_HZ_COMMON
+static bool algov_cpu_is_busy(struct algov_cpu *sg_cpu)
+{
+	unsigned long idle_calls = tick_nohz_get_idle_calls();
+	bool ret = idle_calls == sg_cpu->saved_idle_calls;
+
+	sg_cpu->saved_idle_calls = idle_calls;
+	return ret;
+}
+static void algov_cpu_is_busy_update(struct algov_cpu *sg_cpu,
+				     unsigned long util)
+{
+	unsigned long idle_calls = tick_nohz_get_idle_calls_cpu(sg_cpu->cpu);
+ 	sg_cpu->saved_idle_calls = idle_calls;
+
+	/*
+	 * Make sure that this CPU will not be immediately considered as busy in
+	 * cases where the CPU has already entered an idle state. In that case,
+	 * the number of idle_calls will not vary anymore until it exits idle,
+	 * which would lead algov_cpu_is_busy() to say that this CPU is busy,
+	 * because it has not (re)entered idle since the last time we looked at
+	 * it.
+	 * Assuming cpu0 and cpu1 are in the same policy, that will make sure
+	 * this sequence of events leads to right cpu1 business status from
+	 * get_next_freq(cpu=1)
+	 * cpu0: [enter idle] -> [get_next_freq] -> [doing nothing] -> [wakeup]
+	 * cpu1:                ...              -> [get_next_freq] ->   ...
+	 */
+	if (util <= sg_cpu->previous_util)
+		sg_cpu->saved_idle_calls--;
+
+	sg_cpu->previous_util = util;
+}
+#else
+static inline bool algov_cpu_is_busy(struct algov_cpu *sg_cpu) { return false; }
+static void algov_cpu_is_busy_update(struct algov_cpu *sg_cpu
+				     unsigned long util)
+{}
+#endif /* CONFIG_NO_HZ_COMMON */
+
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
  * @sg_policy: schedalessa policy object to compute the new frequency for.
  * @util: Current CPU utilization.
  * @max: CPU capacity.
+ * @busy: true if at least one CPU in the policy is busy, which means it had no
+ *	idle time since its last frequency change.
  *
  * If the utilization is frequency-invariant, choose the new frequency to be
  * proportional to it, that is
@@ -215,16 +297,37 @@ static void algov_deferred_update(struct algov_policy *sg_policy, u64 time,
  *
  * Take C = 1.25 for the frequency tipping point at (util / max) = 0.8.
  *
+ * An energy-aware boost is then applied if busy is true. The boost will allow
+ * selecting frequencies at most twice as costly in term of energy.
+ *
  * The lowest driver-supported frequency which is equal or greater than the raw
  * next_freq (as calculated above) is returned, subject to policy min/max and
  * cpufreq driver limitations.
  */
 static unsigned int get_next_freq(struct algov_policy *sg_policy,
-				  unsigned long util, unsigned long max)
+				  unsigned long util, unsigned long max,
+				  bool busy)
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned int freq = arch_scale_freq_invariant() ?
 				policy->cpuinfo.max_freq : policy->cur;
+
+	struct em_perf_domain *pd = algov_policy_get_pd(sg_policy);
+
+	/*
+	 * Maximum power we are ready to spend.
+	 * When one CPU is busy in the policy, we apply a boost to help it reach
+	 * the needed frequency faster.
+	 */
+	unsigned int cost_margin = busy ? 1024/2 : 0;
+
+	freq = map_util_freq(util, freq, max);
+
+	/*
+	 * Try to get a higher frequency if one is available, given the extra
+	 * power we are ready to spend.
+	 */
+	freq = em_pd_get_higher_freq(pd, freq, cost_margin);
 
 	freq = (freq + (freq >> 2)) * util / max;
 
@@ -328,19 +431,6 @@ static void algov_iowait_boost(struct algov_cpu *sg_cpu, unsigned long *util,
 	}
 }
 
-#ifdef CONFIG_NO_HZ_COMMON
-static bool algov_cpu_is_busy(struct algov_cpu *sg_cpu)
-{
-	unsigned long idle_calls = tick_nohz_get_idle_calls_cpu(sg_cpu->cpu);
-	bool ret = idle_calls == sg_cpu->saved_idle_calls;
-
-	sg_cpu->saved_idle_calls = idle_calls;
-	return ret;
-}
-#else
-static inline bool algov_cpu_is_busy(struct algov_cpu *sg_cpu) { return false; }
-#endif /* CONFIG_NO_HZ_COMMON */
-
 static void algov_update_single(struct update_util_data *hook, u64 time,
 				unsigned int flags)
 {
@@ -365,13 +455,14 @@ static void algov_update_single(struct update_util_data *hook, u64 time,
 		return;
 
 	busy = use_pelt() && algov_cpu_is_busy(sg_cpu);
+	algov_cpu_is_busy_update(sg_cpu, util);
 
 	if (flags & SCHED_CPUFREQ_DL) {
 		next_f = policy->cpuinfo.max_freq;
 	} else {
 		algov_get_util(&util, &max, time, sg_cpu->cpu);
 		algov_iowait_boost(sg_cpu, &util, &max);
-		next_f = get_next_freq(sg_policy, util, max);
+		next_f = get_next_freq(sg_policy, util, max, busy);
 		/*
 		 * Do not reduce the frequency if the CPU has not been idle
 		 * recently, as the reduction is likely to be premature then.
@@ -405,6 +496,8 @@ static unsigned int algov_next_freq_shared(struct algov_cpu *sg_cpu, u64 time)
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned long util = 0, max = 1;
 	unsigned int j;
+	unsigned long sg_cpu_util = 0;
+	bool busy = false;
 
 	for_each_cpu(j, policy->cpus) {
 		struct algov_cpu *j_sg_cpu = &per_cpu(algov_cpu, j);
@@ -428,8 +521,11 @@ static unsigned int algov_next_freq_shared(struct algov_cpu *sg_cpu, u64 time)
 			return policy->cpuinfo.max_freq;
 
 		j_util = j_sg_cpu->util;
+		if (j_sg_cpu == sg_cpu)
+			sg_cpu_util = j_util;
 		j_max = j_sg_cpu->max;
-		if (j_util * max >= j_max * util) {
+		busy |= algov_cpu_is_busy(j_sg_cpu);
+		if (j_util * max > j_max * util) {
 			util = j_util;
 			max = j_max;
 		}
@@ -437,7 +533,15 @@ static unsigned int algov_next_freq_shared(struct algov_cpu *sg_cpu, u64 time)
 		algov_iowait_boost(j_sg_cpu, &util, &max);
 	}
 
-	return get_next_freq(sg_policy, util, max);
+	/*
+	 * Only update the business status if we are looking at the CPU for
+	 * which a utilization change triggered a call to get_next_freq(). This
+	 * way, we don't affect the "busy" status of CPUs that don't have any
+	 * change in utilization.
+	 */
+	algov_cpu_is_busy_update(sg_cpu, sg_cpu_util);
+
+	return get_next_freq(sg_policy, util, max, busy);
 }
 
 static void algov_update_shared(struct update_util_data *hook, u64 time,
@@ -933,6 +1037,9 @@ static int algov_start(struct cpufreq_policy *policy)
 					     policy_is_shared(policy) ?
 							algov_update_shared :
 							algov_update_single);
+
+	algov_policy_attach_pd(sg_policy);
+
 	}
 	return 0;
 }
