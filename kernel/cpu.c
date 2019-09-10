@@ -931,11 +931,6 @@ static int __init mitigations_parse_cmdline(char *arg)
 }
 early_param("mitigations", mitigations_parse_cmdline);
 
-void init_cpu_isolated(const struct cpumask *src)
-{
-	cpumask_copy(to_cpumask(cpu_isolated_bits), src);
-}
-
 static ATOMIC_NOTIFIER_HEAD(idle_notifier);
 
 void idle_notifier_register(struct notifier_block *n)
