@@ -490,6 +490,7 @@ static void cpufreq_lisi_timer(unsigned long data)
 	bool skip_hispeed_logic, skip_min_sample_time;
 	bool jump_to_max_no_ts = false;
 	bool jump_to_max = false;
+	bool start_hyst = true;
 
 	if (!down_read_trylock(&ppol->enable_sem))
 		return;
@@ -511,7 +512,7 @@ static void cpufreq_lisi_timer(unsigned long data)
 	spin_lock_irqsave(&ppol->target_freq_lock, flags);
 	spin_lock(&ppol->load_lock);
 
-	skip_hispeed_logic = tunables->enable_prediction ? true :
+	skip_hispeed_logic =
 		tunables->ignore_hispeed_on_notif && ppol->notif_pending;
 	skip_min_sample_time = tunables->fast_ramp_down && ppol->notif_pending;
 	ppol->notif_pending = false;
@@ -609,8 +610,12 @@ static void cpufreq_lisi_timer(unsigned long data)
 	}
 
 	if (now - ppol->max_freq_hyst_start_time <
-	    tunables->max_freq_hysteresis)
+	    tunables->max_freq_hysteresis) {
+		if (new_freq < ppol->policy->max &&
+				ppol->policy->max <= tunables->hispeed_freq)
+			start_hyst = false;
 		new_freq = max(tunables->hispeed_freq, new_freq);
+	}
 
 	if (!skip_hispeed_logic &&
 	    ppol->target_freq >= tunables->hispeed_freq &&
@@ -667,7 +672,7 @@ static void cpufreq_lisi_timer(unsigned long data)
 		ppol->floor_validate_time = now;
 	}
 
-	if (new_freq >= ppol->policy->max && !jump_to_max_no_ts)
+	if (start_hyst && new_freq >= ppol->policy->max && !jump_to_max_no_ts)
 		ppol->max_freq_hyst_start_time = now;
 
 	if (ppol->target_freq == new_freq &&
@@ -816,8 +821,8 @@ static int load_change_callback(struct notifier_block *nb, unsigned long val,
 	spin_unlock_irqrestore(&ppol->target_freq_lock, flags);
 
 	if (!hrtimer_is_queued(&ppol->notif_timer))
-		__hrtimer_start_range_ns(&ppol->notif_timer, ms_to_ktime(1),
-					0, HRTIMER_MODE_REL, 0);
+		hrtimer_start(&ppol->notif_timer, ms_to_ktime(1),
+			      HRTIMER_MODE_REL);
 exit:
 	up_read(&ppol->enable_sem);
 	return 0;
@@ -1406,7 +1411,7 @@ static ssize_t store_use_migration_notif(
  */
 #define show_gov_pol_sys(file_name)					\
 static ssize_t show_##file_name##_gov_sys				\
-(struct kobject *kobj, struct attribute *attr, char *buf)		\
+(struct kobject *kobj, struct kobj_attribute *attr, char *buf)		\
 {									\
 	return show_##file_name(common_tunables, buf);			\
 }									\
@@ -1419,7 +1424,7 @@ static ssize_t show_##file_name##_gov_pol				\
 
 #define store_gov_pol_sys(file_name)					\
 static ssize_t store_##file_name##_gov_sys				\
-(struct kobject *kobj, struct attribute *attr, const char *buf,		\
+(struct kobject *kobj, struct kobj_attribute *attr, const char *buf,		\
 	size_t count)							\
 {									\
 	return store_##file_name(common_tunables, buf, count);		\
@@ -1456,7 +1461,7 @@ show_store_gov_pol_sys(enable_prediction);
 
 /* Add permissions to sysfs */
 #define gov_sys_attr_rw(_name)						\
-static struct global_attr _name##_gov_sys =				\
+static struct kobj_attribute _name##_gov_sys =				\
 __ATTR(_name, 0644, show_##_name##_gov_sys, store_##_name##_gov_sys)
 
 #define gov_pol_attr_rw(_name)						\
@@ -1486,7 +1491,7 @@ gov_sys_pol_attr_rw(fast_ramp_down);
 gov_sys_pol_attr_rw(enable_prediction);
 
 /* Boost pulse support */
-static struct global_attr boostpulse_gov_sys =
+static struct kobj_attribute boostpulse_gov_sys =
 	__ATTR(boostpulse, 0200, NULL, store_boostpulse_gov_sys);
 
 static struct freq_attr boostpulse_gov_pol =
@@ -1677,7 +1682,8 @@ static int cpufreq_governor_lisi(struct cpufreq_policy *policy,
 	else
 		tunables = common_tunables;
 
-	BUG_ON(!tunables && (event != CPUFREQ_GOV_POLICY_INIT));
+	if (WARN_ON(!tunables && (event != CPUFREQ_GOV_POLICY_INIT)))
+		return -EINVAL;
 
 	switch (event) {
 	case CPUFREQ_GOV_POLICY_INIT:
@@ -1707,7 +1713,6 @@ static int cpufreq_governor_lisi(struct cpufreq_policy *policy,
 		policy->governor_data = tunables;
 		if (!have_governor_per_policy()) {
 			common_tunables = tunables;
-			WARN_ON(cpufreq_get_global_kobject());
 		}
 
 		rc = sysfs_create_group(get_governor_parent_kobj(policy),
@@ -1717,7 +1722,6 @@ static int cpufreq_governor_lisi(struct cpufreq_policy *policy,
 			policy->governor_data = NULL;
 			if (!have_governor_per_policy()) {
 				common_tunables = NULL;
-				cpufreq_put_global_kobject();
 			}
 			return rc;
 		}
@@ -1751,9 +1755,6 @@ static int cpufreq_governor_lisi(struct cpufreq_policy *policy,
 
 			sysfs_remove_group(get_governor_parent_kobj(policy),
 					get_sysfs_attr());
-
-			if (!have_governor_per_policy())
-				cpufreq_put_global_kobject();
 			common_tunables = NULL;
 		}
 
@@ -1847,6 +1848,7 @@ struct cpufreq_governor cpufreq_gov_lisi = {
 static int __init cpufreq_lisi_init(void)
 {
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
+	int ret = 0;
 
 	spin_lock_init(&speedchange_cpumask_lock);
 	mutex_init(&lisi_lock_gov);
@@ -1867,6 +1869,11 @@ static int __init cpufreq_lisi_init(void)
 	wake_up_process_no_notif(speedchange_task);
 
 	return cpufreq_register_governor(&cpufreq_gov_lisi);
+	if (ret) {
+		kthread_stop(speedchange_task);
+		put_task_struct(speedchange_task);
+	}
+	return ret;
 }
 
 #ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_LISI
