@@ -16,7 +16,7 @@
 * Autor: Carlos "Klozz" Jesús <xxx.reptar.rawrr.xxx@gmail.com>
 * 	(C) 2014 Klozz Jesús (TeamMEX@XDA-Developers)
 *
-* This peace of art are dedicated to Stephanny Marlene...
+* This piece of art is dedicated to Stephanny Marlene...
 *
 * v1.0
 * v2.7.0.7 too much updates like:
