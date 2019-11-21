@@ -10,13 +10,13 @@
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
- * 
+ *
  * v2.0 Use >= when aggregating CPU loads in a policy
  * - Switch from sprintf to scnprintf
  * - Add trace point for get_next_freq
  * - Avoid processing certain notifications
  * - Return to FIFO
- * v2.3 
+ * v2.3
  * - Implement Energy Model
  */
 
@@ -118,7 +118,7 @@ static void algov_policy_attach_pd(struct algov_policy *sg_policy)
 	if (cpumask_equal(policy->related_cpus, to_cpumask(pd->cpus)))
 		sg_policy->pd = pd;
 	else
-		pr_warn("%s: Not all CPUs in schedutil policy %u share the same perf domain, no perf domain for that policy will be registered\n",
+		pr_warn("%s: Not all CPUs in schedalessa policy %u share the same perf domain, no perf domain for that policy will be registered\n",
 			__func__, policy->cpu);
 }
 
