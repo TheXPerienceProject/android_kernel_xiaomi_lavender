@@ -29,6 +29,7 @@
 #include <linux/of.h>
 #include <trace/events/power.h>
 
+#include <linux/clk/msm-clk-provider.h>
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
 
