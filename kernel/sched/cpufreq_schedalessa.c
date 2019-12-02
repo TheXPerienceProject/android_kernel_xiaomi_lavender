@@ -790,7 +790,7 @@ static int algov_kthread_create(struct algov_policy *sg_policy)
 		return PTR_ERR(thread);
 	}
 
-	ret = sched_setscheduler_nocheck(thread, SCHED_RR, &param);
+	ret = sched_setscheduler_nocheck(thread, SCHED_FIFO, &param);
 	if (ret) {
 		kthread_stop(thread);
 		pr_warn("%s: failed to set SCHED_FIFO\n", __func__);
