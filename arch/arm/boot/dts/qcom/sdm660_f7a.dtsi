@@ -961,7 +961,7 @@
 		qcom,bcl-enable;
 		qcom,bcl-framework-interface;
 		qcom,bcl-hotplug-list = <&CPU6 &CPU7>;
-		qcom,bcl-soc-hotplug-list = <&CPU5 &CPU7>;
+		qcom,bcl-soc-hotplug-list = <&CPU4 &CPU5 &CPU6 &CPU7>;
 		qcom,ibat-monitor {
 			qcom,low-threshold-uamp = <3400000>;
 			qcom,high-threshold-uamp = <4200000>;
@@ -1820,6 +1820,7 @@
 		qcom,irq-mask = <0x200>;
 		interrupts = <0 157 1>;
 		label = "lpass";
+		cpu-affinity = <1 2>;
 		qcom,qos-config = <&glink_qos_adsp>;
 		qcom,ramp-time = <0xaf>;
 	};
