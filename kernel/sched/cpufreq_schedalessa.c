@@ -40,6 +40,8 @@ unsigned long boosted_cpu_util(int cpu);
 #define cpufreq_disable_fast_switch(x)
 #define UP_RATE_LIMIT_US        (500)
 #define DOWN_RATE_LIMIT_US	    (20000)
+#define algov_up_rate_limit 500
+#define algov_down_rate_limit 20000
 
 struct algov_tunables {
 	struct gov_attr_set attr_set;
@@ -938,6 +940,10 @@ static int algov_init(struct cpufreq_policy *policy)
                         tunables->down_rate_limit_us *= lat;
                 }
 	}
+
+	/* Hard-code some sane rate-limit values */
+	tunables->up_rate_limit_us = algov_up_rate_limit;
+	tunables->down_rate_limit_us = algov_down_rate_limit;
 
 	tunables->iowait_boost_enable = false;
 
