@@ -92,7 +92,7 @@
 
 #define FULL_CAPACITY			100
 #define FULL_SOC_RAW			255
-#ifdef CONFIG_MACH_XIAOMI_WAYNE
+#if defined(CONFIG_MACH_XIAOMI_LAVENDER) || defined(CONFIG_MACH_XIAOMI_WAYNE)
 #define FULL_SOC_REPORT_THR		250
 #endif
 
@@ -491,7 +491,7 @@ struct fg_dev {
 	bool			battery_missing;
 	bool			fg_restarting;
 	bool			charge_full;
-#ifdef CONFIG_MACH_XIAOMI_WAYNE
+#if defined(CONFIG_MACH_XIAOMI_LAVENDER) || defined(CONFIG_MACH_XIAOMI_WAYNE)
 	bool			report_full;
 #endif
 	bool			recharge_soc_adjusted;

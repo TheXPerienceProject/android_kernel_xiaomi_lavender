@@ -2678,7 +2678,7 @@ static void status_change_work(struct work_struct *work)
 			struct fg_dev, status_change_work);
 	union power_supply_propval prop = {0, };
 	int rc, batt_temp;
-#ifdef CONFIG_MACH_XIAOMI_WAYNE
+#if defined(CONFIG_MACH_XIAOMI_LAVENDER) || defined(CONFIG_MACH_XIAOMI_WAYNE)
 	int msoc;
 #endif
 
@@ -2723,7 +2723,7 @@ static void status_change_work(struct work_struct *work)
 	fg_cycle_counter_update(fg);
 	fg_cap_learning_update(fg);
 
-#ifdef CONFIG_MACH_XIAOMI_WAYNE
+#if defined(CONFIG_MACH_XIAOMI_LAVENDER) || defined(CONFIG_MACH_XIAOMI_WAYNE)
 	if (chip->charge_done && !chip->report_full) {
 		chip->report_full = true;
 	} else if (!chip->charge_done && chip->report_full) {
