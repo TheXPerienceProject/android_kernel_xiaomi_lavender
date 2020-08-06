@@ -393,7 +393,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
-                   -Wno-unknown-warning-option \
+		   -Wno-unknown-warning-option -Wno-void-pointer-to-enum-cast \
 		   -std=gnu89 $(call cc-option,-fno-PIE)
 
 # Optimization for sdm660
