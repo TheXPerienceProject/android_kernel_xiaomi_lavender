@@ -396,7 +396,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -std=gnu89 $(call cc-option,-fno-PIE)
 
 # Optimization for sdm660
-KBUILD_CFLAGS	+= -mcpu=cortex-a53+crc+crypto
+#KBUILD_CFLAGS	+= -mcpu=cortex-a53+crc+crypto
 
 ifeq ($(TARGET_BOARD_TYPE),auto)
 KBUILD_CFLAGS    += -DCONFIG_PLATFORM_AUTO
