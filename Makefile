@@ -395,7 +395,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Wno-implicit-function-declaration \
 		   -Wno-format-security \
-		   -Wno-unknown-warning-option -Wno-void-pointer-to-enum-cast \
+		   -Wno-unknown-warning-option \
 		   -std=gnu89 $(call cc-option,-fno-PIE)
 
 # Optimization for sdm660
@@ -747,7 +747,7 @@ KBUILD_CFLAGS += -Wno-initializer-overrides
 KBUILD_CFLAGS += -fno-builtin
 KBUILD_CFLAGS += $(call cc-disable-warning, address-of-packed-member)
 KBUILD_CFLAGS += $(call cc-disable-warning, duplicate-decl-specifier)
-KBUILD_CFLAGS += -Wno-undefined-optimized
+#KBUILD_CFLAGS += -Wno-undefined-optimized
 KBUILD_CFLAGS += -Wno-tautological-constant-out-of-range-compare
 
 # Quiet clang warning: comparison of unsigned expression < 0 is always false
