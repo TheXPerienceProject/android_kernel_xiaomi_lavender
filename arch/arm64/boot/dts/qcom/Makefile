@@ -425,41 +425,14 @@ dtb-$(CONFIG_ARCH_MDM9607) += mdm9607-cdp.dtb \
         mdm9607-mtp.dtb \
 	mdm9607-rcm.dtb \
 
-ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
-	dtbo-$(CONFIG_ARCH_SDM660) += \
-		sdm660-mtp-external-codec-overlay.dtbo \
-		sdm660-mtp-internal-codec-overlay.dtbo \
-		sdm660-cdp-external-codec-overlay.dtbo \
-		sdm660-cdp-internal-codec-overlay.dtbo \
-		sdm660-qrd-external-codec-overlay.dtbo \
-		sdm660-rcm-external-codec-overlay.dtbo \
-		sdm660-rcm-internal-codec-overlay.dtbo \
-		sda660-mtp-external-codec-overlay.dtbo \
-		sda660-cdp-external-codec-overlay.dtbo \
-		sda660-rcm-external-codec-overlay.dtbo
-
-sdm660-mtp-external-codec-overlay.dtbo-base := sdm660-pm660l.dtb
-
-sdm660-mtp-internal-codec-overlay.dtbo-base := sdm660-pm660l.dtb
-
-sdm660-cdp-external-codec-overlay.dtbo-base := sdm660-pm660l.dtb
-
-sdm660-cdp-internal-codec-overlay.dtbo-base := sdm660-pm660l.dtb
-
-sdm660-qrd-external-codec-overlay.dtbo-base := sdm660-pm660l.dtb
-
-sdm660-rcm-external-codec-overlay.dtbo-base := sdm660-pm660l.dtb
-
-sdm660-rcm-internal-codec-overlay.dtbo-base := sdm660-pm660l.dtb
-
-sda660-mtp-external-codec-overlay.dtbo-base := sda660-pm660l.dtb
-
-sda660-cdp-external-codec-overlay.dtbo-base := sda660-pm660l.dtb
-
-sda660-rcm-external-codec-overlay.dtbo-base := sda660-pm660l.dtb
-else
 ifeq ($(CONFIG_MACH_XIAOMI_SDM660),y)
+ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
+dtbo-$(CONFIG_MACH_XIAOMI_LAVENDER) += sdm660-mtp-lavender-overlay.dtbo
+sdm660-mtp-lavender-overlay.dtbo-base := sdm660-mtp-lavender.dtb
+else
+dtb-$(CONFIG_MACH_XIAOMI_LAVENDER) := sdm660-mtp-lavender.dtb
 dtb-$(CONFIG_MACH_XIAOMI_WAYNE) += sdm660-mtp-wayne.dtb sdm660-mtp-jasmine.dtb
+endif
 else
 dtb-$(CONFIG_ARCH_SDM660) += sdm660-sim.dtb \
 	sdm660-internal-codec-cdp.dtb \
@@ -490,7 +463,6 @@ dtb-$(CONFIG_ARCH_SDM660) += sdm660-sim.dtb \
 	sdm660-pm660a-headset-jacktype-no-rcm.dtb \
 	sdm660-usbc-audio-mtp.dtb \
 	sdm660-usbc-audio-rcm.dtb
-endif
 endif
 
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
