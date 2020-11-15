@@ -3,9 +3,9 @@
 #
 menuconfig TOUCHSCREEN_SYNAPTICS_TCM
 	bool "Synaptics TCM touchscreen"
+	default y
 	help
-	  Say Y here if you have a Synaptics TCM touchscreen connected
-	  to your system.
+	  Say Y here, if you have a Synaptics TCM touchscreen connected.
 
 	  If unsure, say N.
 
@@ -17,25 +17,9 @@ choice
 config TOUCHSCREEN_SYNAPTICS_TCM_I2C
 	bool "I2C"
 	depends on I2C
-	help
-	  Say Y here to use I2C bus for communication.
-
-	  Else, say N.
-
-	  This will configure I2C bus for communicating
-	  with touch controller.
-
 config TOUCHSCREEN_SYNAPTICS_TCM_SPI
 	bool "SPI"
 	depends on SPI_MASTER
-	help
-	  Say Y here to use SPI bus for communication.
-
-	  Else, say N.
-
-	  This will configure SPI bus for communicating
-	  with touch controller.
-
 endchoice
 
 config TOUCHSCREEN_SYNAPTICS_TCM_CORE

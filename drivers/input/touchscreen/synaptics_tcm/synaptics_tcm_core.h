@@ -1,9 +1,9 @@
 /*
  * Synaptics TCM touchscreen driver
  *
- * Copyright (C) 2017-2019 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (C) 2017-2019 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -39,26 +39,20 @@
 #include <linux/input.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
-#include <linux/slab.h>
 #include <linux/input/synaptics_tcm.h>
-#ifdef CONFIG_DRM
-#include <linux/msm_drm_notify.h>
-#elif CONFIG_FB
+#ifdef CONFIG_FB
 #include <linux/fb.h>
 #include <linux/notifier.h>
 #endif
-#include <uapi/linux/sched/types.h>
 
 #define SYNAPTICS_TCM_ID_PRODUCT (1 << 0)
-#define SYNAPTICS_TCM_ID_VERSION 0x0101
+#define SYNAPTICS_TCM_ID_VERSION 0x0100
 #define SYNAPTICS_TCM_ID_SUBVERSION 0
 
 #define PLATFORM_DRIVER_NAME "synaptics_tcm"
 
 #define TOUCH_INPUT_NAME "synaptics_tcm_touch"
 #define TOUCH_INPUT_PHYS_PATH "synaptics_tcm/touch_input"
-
-/* #define WAKEUP_GESTURE */
 
 #define RD_CHUNK_SIZE 0 /* read length limit in bytes, 0 = unlimited */
 #define WR_CHUNK_SIZE 0 /* write length limit in bytes, 0 = unlimited */
@@ -78,6 +72,27 @@
 #define LOGN(dev, log, ...) LOGx(dev_notice, dev, log, ##__VA_ARGS__)
 #define LOGW(dev, log, ...) LOGy(dev_warn, dev, log, ##__VA_ARGS__)
 #define LOGE(dev, log, ...) LOGy(dev_err, dev, log, ##__VA_ARGS__)
+
+
+
+#if 1
+#define LOGV(log, ...) \
+	printk(KERN_ERR "[synaptics] %s (line %d): " log, __func__, __LINE__, ##__VA_ARGS__)
+#else
+#define LOGV(log, ...) {}
+#endif
+
+#if 0
+#define LOG_ENTRY() \
+	printk(KERN_WARNING "[synaptics][debug] %s (file %s line %d) Entry.\n", __func__, __FILE__, __LINE__)
+#define LOG_DONE() \
+	printk(KERN_WARNING "[synaptics][debug] %s (file %s line %d) Done.\n", __func__, __FILE__, __LINE__)
+#else
+#define LOG_ENTRY() {}
+#define LOG_DONE() {}
+#endif
+
+
 
 #define INIT_BUFFER(buffer, is_clone) \
 	mutex_init(&buffer.buf_mutex); \
@@ -117,18 +132,18 @@ static ssize_t CONCAT(m_name##_sysfs, _##a_name##_show)(struct device *dev, \
 		struct device_attribute *attr, char *buf); \
 \
 static struct device_attribute dev_attr_##a_name = \
-		__ATTR(a_name, 0444, \
+		__ATTR(a_name, S_IRUGO, \
 		CONCAT(m_name##_sysfs, _##a_name##_show), \
-		syna_tcm_store_error)
+		syna_tcm_store_error);
 
 #define STORE_PROTOTYPE(m_name, a_name) \
 static ssize_t CONCAT(m_name##_sysfs, _##a_name##_store)(struct device *dev, \
 		struct device_attribute *attr, const char *buf, size_t count); \
 \
 static struct device_attribute dev_attr_##a_name = \
-		__ATTR(a_name, 0220, \
+		__ATTR(a_name, (S_IWUSR | S_IWGRP), \
 		syna_tcm_show_error, \
-		CONCAT(m_name##_sysfs, _##a_name##_store))
+		CONCAT(m_name##_sysfs, _##a_name##_store));
 
 #define SHOW_STORE_PROTOTYPE(m_name, a_name) \
 static ssize_t CONCAT(m_name##_sysfs, _##a_name##_show)(struct device *dev, \
@@ -138,15 +153,11 @@ static ssize_t CONCAT(m_name##_sysfs, _##a_name##_store)(struct device *dev, \
 		struct device_attribute *attr, const char *buf, size_t count); \
 \
 static struct device_attribute dev_attr_##a_name = \
-		__ATTR(a_name, 0664, \
+		__ATTR(a_name, (S_IRUGO | S_IWUSR | S_IWGRP), \
 		CONCAT(m_name##_sysfs, _##a_name##_show), \
-		CONCAT(m_name##_sysfs, _##a_name##_store))
+		CONCAT(m_name##_sysfs, _##a_name##_store));
 
 #define ATTRIFY(a_name) (&dev_attr_##a_name)
-
-#define PINCTRL_STATE_ACTIVE    "pmx_ts_active"
-#define PINCTRL_STATE_SUSPEND   "pmx_ts_suspend"
-#define PINCTRL_STATE_RELEASE   "pmx_ts_release"
 
 enum module_type {
 	TCM_TOUCH = 0,
@@ -204,6 +215,7 @@ enum dynamic_config_id {
 	DC_GRIP_SUPPRESSION_ENABLED,
 	DC_ENABLE_THICK_GLOVE,
 	DC_ENABLE_GLOVE,
+	DC_Enable_Landscape_Grip_Mode=0xD0,
 };
 
 enum command {
@@ -308,6 +320,12 @@ struct syna_tcm_watchdog {
 	struct workqueue_struct *workqueue;
 };
 
+struct syna_tcm_glove {
+	bool keep_runing;
+	struct delayed_work work;
+	struct workqueue_struct *workqueue;
+};
+
 struct syna_tcm_buffer {
 	bool clone;
 	unsigned char *buf;
@@ -391,16 +409,15 @@ struct syna_tcm_hcd {
 	pid_t isr_pid;
 	atomic_t command_status;
 	atomic_t host_downloading;
-	atomic_t firmware_flashing;
 	wait_queue_head_t hdl_wq;
-	wait_queue_head_t reflash_wq;
 	int irq;
 	bool init_okay;
 	bool do_polling;
 	bool in_suspend;
 	bool irq_enabled;
 	bool host_download_mode;
-	unsigned char marker;
+	bool reseting;
+	bool upgrading;
 	unsigned char fb_ready;
 	unsigned char command;
 	unsigned char async_report_id;
@@ -424,14 +441,12 @@ struct syna_tcm_hcd {
 	struct mutex rw_ctrl_mutex;
 	struct mutex command_mutex;
 	struct mutex identify_mutex;
+	struct mutex pm_mutex;
+	struct work_struct reset_work;
 	struct delayed_work polling_work;
 	struct workqueue_struct *polling_workqueue;
 	struct task_struct *notifier_thread;
-	struct pinctrl *ts_pinctrl;
-	struct pinctrl_state *pinctrl_state_active;
-	struct pinctrl_state *pinctrl_state_suspend;
-	struct pinctrl_state *pinctrl_state_release;
-#if defined(CONFIG_DRM) || defined(CONFIG_FB)
+#ifdef CONFIG_FB
 	struct notifier_block fb_notifier;
 #endif
 	struct syna_tcm_buffer in;
@@ -446,6 +461,7 @@ struct syna_tcm_hcd {
 	struct syna_tcm_identification id_info;
 	struct syna_tcm_helper helper;
 	struct syna_tcm_watchdog watchdog;
+	struct syna_tcm_glove glove;
 	struct syna_tcm_features features;
 	const struct syna_tcm_hw_interface *hw_if;
 	int (*reset)(struct syna_tcm_hcd *tcm_hcd, bool hw, bool update_wd);
@@ -669,8 +685,7 @@ static inline unsigned int le4_to_uint(const unsigned char *src)
 			(unsigned int)src[3] * 0x1000000;
 }
 
-static inline unsigned int ceil_div(unsigned int dividend,
-		unsigned int divisor)
+static inline unsigned int ceil_div(unsigned int dividend, unsigned divisor)
 {
 	return (dividend + divisor - 1) / divisor;
 }

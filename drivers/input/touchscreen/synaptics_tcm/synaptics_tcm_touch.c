@@ -1,9 +1,9 @@
 /*
  * Synaptics TCM touchscreen driver
  *
- * Copyright (C) 2017-2019 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (C) 2017-2019 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,6 +33,10 @@
 #include <linux/input/mt.h>
 #include <linux/interrupt.h>
 #include "synaptics_tcm_core.h"
+
+/* add check F7A LCM by wanghan start */
+extern bool synaptics_gesture_enable_flag;
+/* add check F7A LCM by wanghan end */
 
 #define TYPE_B_PROTOCOL
 
@@ -133,6 +137,35 @@ DECLARE_COMPLETION(touch_remove_complete);
 
 static struct touch_hcd *touch_hcd;
 
+extern bool gesture_delay;
+#define WAKEUP_OFF 4
+#define WAKEUP_ON 5
+
+int synaptics_gesture_switch(struct input_dev *dev, unsigned int type, unsigned int code, int value)
+{
+	LOG_ENTRY();
+	LOGV("type=%d, code=%d, value=%d\n", type, code, value);
+	if (type == EV_SYN && code == SYN_CONFIG)
+	{
+		if (touch_hcd->tcm_hcd->in_suspend)
+		{
+			if ((value != WAKEUP_OFF) || synaptics_gesture_enable_flag)
+			{
+				gesture_delay = true;
+			}
+		}
+		if(value == WAKEUP_OFF){
+			synaptics_gesture_enable_flag = false;
+			LOGV("disable gesture mode\n");
+		}else if(value == WAKEUP_ON) {
+			synaptics_gesture_enable_flag  = true;
+			LOGV("enable gesture mode\n");
+		}
+	}
+	LOG_DONE();
+	return 0;
+}
+
 /**
  * touch_free_objects() - Free all touch objects
  *
@@ -144,6 +177,7 @@ static void touch_free_objects(void)
 	unsigned int idx;
 #endif
 
+	LOG_ENTRY();
 	if (touch_hcd->input_dev == NULL)
 		return;
 
@@ -166,6 +200,9 @@ static void touch_free_objects(void)
 	input_sync(touch_hcd->input_dev);
 
 	mutex_unlock(&touch_hcd->report_mutex);
+
+	LOG_DONE();
+	return;
 }
 
 /**
@@ -188,6 +225,7 @@ static int touch_get_report_data(unsigned int offset,
 	unsigned char *touch_report;
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 
+	LOG_ENTRY();
 	if (bits == 0 || bits > 32) {
 		LOGE(tcm_hcd->pdev->dev.parent,
 				"Invalid number of bits\n");
@@ -226,6 +264,7 @@ static int touch_get_report_data(unsigned int offset,
 
 	*data = output_data;
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -258,6 +297,7 @@ static int touch_parse_report(void)
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 	static unsigned int end_of_foreach;
 
+	LOG_ENTRY();
 	touch_data = &touch_hcd->touch_data;
 	object_data = touch_hcd->touch_data.object_data;
 
@@ -334,7 +374,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get classification data\n");
+						"Failed to get object classification\n");
 				return retval;
 			}
 			object_data[obj].status = data;
@@ -345,7 +385,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get object x position\n");
+						"Failed to get object x position\n");
 				return retval;
 			}
 			object_data[obj].x_pos = data;
@@ -356,7 +396,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get object y position\n");
+						"Failed to get object y position\n");
 				return retval;
 			}
 			object_data[obj].y_pos = data;
@@ -378,7 +418,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get object x width\n");
+						"Failed to get object x width\n");
 				return retval;
 			}
 			object_data[obj].x_width = data;
@@ -389,7 +429,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get object y width\n");
+						"Failed to get object y width\n");
 				return retval;
 			}
 			object_data[obj].y_width = data;
@@ -400,7 +440,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get object tx position\n");
+						"Failed to get object tx position\n");
 				return retval;
 			}
 			object_data[obj].tx_pos = data;
@@ -411,7 +451,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get object rx position\n");
+						"Failed to get object rx position\n");
 				return retval;
 			}
 			object_data[obj].rx_pos = data;
@@ -422,7 +462,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get 0D buttons state\n");
+						"Failed to get 0D buttons state\n");
 				return retval;
 			}
 			touch_data->buttons_state = data;
@@ -433,7 +473,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get gesture double tap\n");
+						"Failed to get gesture double tap\n");
 				return retval;
 			}
 			touch_data->gesture_double_tap = data;
@@ -488,7 +528,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get CID variance IM\n");
+						"Failed to get CID variance IM\n");
 				return retval;
 			}
 			touch_data->cid_variance_im = data;
@@ -499,7 +539,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get NSM frequency\n");
+						"Failed to get NSM frequency\n");
 				return retval;
 			}
 			touch_data->nsm_frequency = data;
@@ -521,7 +561,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get number of objects\n");
+						"Failed to get number of active objects\n");
 				return retval;
 			}
 			active_objects = data;
@@ -536,7 +576,7 @@ static int touch_parse_report(void)
 			retval = touch_get_report_data(offset, bits, &data);
 			if (retval < 0) {
 				LOGE(tcm_hcd->pdev->dev.parent,
-					"Failed to get number of CPU cycles\n");
+						"Failed to get number of CPU cycles used since last frame\n");
 				return retval;
 			}
 			touch_data->num_of_cpu_cycles = data;
@@ -558,6 +598,7 @@ static int touch_parse_report(void)
 	}
 
 exit:
+	LOG_DONE();
 	return 0;
 }
 
@@ -581,6 +622,7 @@ static void touch_report(void)
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 	const struct syna_tcm_board_data *bdata = tcm_hcd->hw_if->bdata;
 
+	LOG_ENTRY();
 	if (!touch_hcd->report_touch)
 		return;
 
@@ -599,14 +641,13 @@ static void touch_report(void)
 	touch_data = &touch_hcd->touch_data;
 	object_data = touch_hcd->touch_data.object_data;
 
-#ifdef WAKEUP_GESTURE
 	if (touch_data->gesture_double_tap && tcm_hcd->in_suspend) {
 		input_report_key(touch_hcd->input_dev, KEY_WAKEUP, 1);
 		input_sync(touch_hcd->input_dev);
 		input_report_key(touch_hcd->input_dev, KEY_WAKEUP, 0);
 		input_sync(touch_hcd->input_dev);
+		LOGV("Double Tap\n");
 	}
-#endif
 
 	if (tcm_hcd->in_suspend)
 		goto exit;
@@ -628,8 +669,9 @@ static void touch_report(void)
 					MT_TOOL_FINGER, 0);
 #endif
 			break;
-		case FINGER:
 		case GLOVED_FINGER:
+			tcm_hcd->glove.keep_runing = true;
+		case FINGER:
 			x = object_data[idx].x_pos;
 			y = object_data[idx].y_pos;
 			if (bdata->swap_axes) {
@@ -683,6 +725,9 @@ static void touch_report(void)
 
 exit:
 	mutex_unlock(&touch_hcd->report_mutex);
+
+	LOG_DONE();
+	return;
 }
 
 /**
@@ -696,6 +741,7 @@ static int touch_set_input_params(void)
 {
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 
+	LOG_ENTRY();
 	input_set_abs_params(touch_hcd->input_dev,
 			ABS_MT_POSITION_X, 0, touch_hcd->max_x, 0, 0);
 	input_set_abs_params(touch_hcd->input_dev,
@@ -715,10 +761,11 @@ static int touch_set_input_params(void)
 	touch_hcd->prev_status = kzalloc(touch_hcd->max_objects, GFP_KERNEL);
 	if (!touch_hcd->prev_status) {
 		LOGE(tcm_hcd->pdev->dev.parent,
-			"Failed to allocate memory for prev_status\n");
+				"Failed to allocate memory for touch_hcd->prev_status\n");
 		return -ENOMEM;
 	}
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -737,6 +784,7 @@ static int touch_get_input_params(void)
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 	const struct syna_tcm_board_data *bdata = tcm_hcd->hw_if->bdata;
 
+	LOG_ENTRY();
 	app_info = &tcm_hcd->app_info;
 	touch_hcd->max_x = le2_to_uint(app_info->max_x);
 	touch_hcd->max_y = le2_to_uint(app_info->max_y);
@@ -769,6 +817,7 @@ static int touch_get_input_params(void)
 
 	UNLOCK_BUFFER(tcm_hcd->config);
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -784,6 +833,7 @@ static int touch_set_input_dev(void)
 	int retval;
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 
+	LOG_ENTRY();
 	touch_hcd->input_dev = input_allocate_device();
 	if (touch_hcd->input_dev == NULL) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -807,10 +857,9 @@ static int touch_set_input_dev(void)
 	set_bit(INPUT_PROP_DIRECT, touch_hcd->input_dev->propbit);
 #endif
 
-#ifdef WAKEUP_GESTURE
 	set_bit(KEY_WAKEUP, touch_hcd->input_dev->keybit);
 	input_set_capability(touch_hcd->input_dev, EV_KEY, KEY_WAKEUP);
-#endif
+	touch_hcd->input_dev->event = synaptics_gesture_switch;
 
 	retval = touch_set_input_params();
 	if (retval < 0) {
@@ -830,6 +879,7 @@ static int touch_set_input_dev(void)
 		return retval;
 	}
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -846,10 +896,11 @@ static int touch_set_report_config(void)
 	unsigned int length;
 	struct syna_tcm_app_info *app_info;
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
-	const struct syna_tcm_board_data *bdata = tcm_hcd->hw_if->bdata;
 
-	if (!bdata->extend_report)
-		return 0;
+	LOG_ENTRY();
+#ifdef USE_DEFAULT_TOUCH_REPORT_CONFIG
+	return 0;
+#endif
 
 	app_info = &tcm_hcd->app_info;
 	length = le2_to_uint(app_info->max_touch_report_config_size);
@@ -867,16 +918,14 @@ static int touch_set_report_config(void)
 			length);
 	if (retval < 0) {
 		LOGE(tcm_hcd->pdev->dev.parent,
-			"Failed to allocate memory for touch_hcd->out.buf\n");
+				"Failed to allocate memory for touch_hcd->out.buf\n");
 		UNLOCK_BUFFER(touch_hcd->out);
 		return retval;
 	}
 
 	idx = 0;
-#ifdef WAKEUP_GESTURE
 	touch_hcd->out.buf[idx++] = TOUCH_GESTURE_DOUBLE_TAP;
 	touch_hcd->out.buf[idx++] = 8;
-#endif
 	touch_hcd->out.buf[idx++] = TOUCH_FOREACH_ACTIVE_OBJECT;
 	touch_hcd->out.buf[idx++] = TOUCH_OBJECT_N_INDEX;
 	touch_hcd->out.buf[idx++] = 4;
@@ -912,6 +961,7 @@ static int touch_set_report_config(void)
 	UNLOCK_BUFFER(touch_hcd->resp);
 	UNLOCK_BUFFER(touch_hcd->out);
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -926,6 +976,7 @@ static int touch_check_input_params(void)
 	unsigned int size;
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 
+	LOG_ENTRY();
 	if (touch_hcd->max_x == 0 && touch_hcd->max_y == 0)
 		return 0;
 
@@ -936,7 +987,7 @@ static int touch_check_input_params(void)
 		touch_hcd->touch_data.object_data = kzalloc(size, GFP_KERNEL);
 		if (!touch_hcd->touch_data.object_data) {
 			LOGE(tcm_hcd->pdev->dev.parent,
-				"Failed to allocate memory for object_data\n");
+					"Failed to allocate memory for touch_hcd->touch_data.object_data\n");
 			return -ENOMEM;
 		}
 		return 1;
@@ -948,6 +999,7 @@ static int touch_check_input_params(void)
 	if (touch_hcd->input_params.max_y != touch_hcd->max_y)
 		return 1;
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -963,6 +1015,7 @@ static int touch_set_input_reporting(void)
 	int retval;
 	struct syna_tcm_hcd *tcm_hcd = touch_hcd->tcm_hcd;
 
+	LOG_ENTRY();
 	if (tcm_hcd->id_info.mode != MODE_APPLICATION ||
 			tcm_hcd->app_status != APP_STATUS_OK) {
 		LOGN(tcm_hcd->pdev->dev.parent,
@@ -996,7 +1049,7 @@ static int touch_set_input_reporting(void)
 				"Failed to check input parameters\n");
 		goto exit;
 	} else if (retval == 0) {
-		LOGD(tcm_hcd->pdev->dev.parent,
+		LOGN(tcm_hcd->pdev->dev.parent,
 				"Input parameters unchanged\n");
 		goto exit;
 	}
@@ -1018,6 +1071,7 @@ exit:
 
 	touch_hcd->report_touch = retval < 0 ? false : true;
 
+	LOG_DONE();
 	return retval;
 }
 
@@ -1025,6 +1079,7 @@ static int touch_init(struct syna_tcm_hcd *tcm_hcd)
 {
 	int retval;
 
+	LOG_ENTRY();
 	touch_hcd = kzalloc(sizeof(*touch_hcd), GFP_KERNEL);
 	if (!touch_hcd) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -1060,18 +1115,19 @@ err_set_input_reporting:
 	kfree(touch_hcd);
 	touch_hcd = NULL;
 
+	LOG_DONE();
 	return retval;
 }
 
 static int touch_remove(struct syna_tcm_hcd *tcm_hcd)
 {
+	LOG_ENTRY();
 	if (!touch_hcd)
 		goto exit;
 
 	tcm_hcd->report_touch = NULL;
 
-	if (touch_hcd->input_dev)
-		input_unregister_device(touch_hcd->input_dev);
+	input_unregister_device(touch_hcd->input_dev);
 
 	kfree(touch_hcd->touch_data.object_data);
 	kfree(touch_hcd->prev_status);
@@ -1085,11 +1141,13 @@ static int touch_remove(struct syna_tcm_hcd *tcm_hcd)
 exit:
 	complete(&touch_remove_complete);
 
+	LOG_DONE();
 	return 0;
 }
 
 static int touch_syncbox(struct syna_tcm_hcd *tcm_hcd)
 {
+	LOG_ENTRY();
 	if (!touch_hcd)
 		return 0;
 
@@ -1105,6 +1163,7 @@ static int touch_syncbox(struct syna_tcm_hcd *tcm_hcd)
 		break;
 	}
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -1112,6 +1171,7 @@ static int touch_asyncbox(struct syna_tcm_hcd *tcm_hcd)
 {
 	int retval;
 
+	LOG_ENTRY();
 	if (!touch_hcd)
 		return 0;
 
@@ -1136,6 +1196,7 @@ static int touch_asyncbox(struct syna_tcm_hcd *tcm_hcd)
 		break;
 	}
 
+	LOG_DONE();
 	return 0;
 }
 
@@ -1143,6 +1204,7 @@ static int touch_reset(struct syna_tcm_hcd *tcm_hcd)
 {
 	int retval;
 
+	LOG_ENTRY();
 	if (!touch_hcd) {
 		retval = touch_init(tcm_hcd);
 		return retval;
@@ -1157,31 +1219,29 @@ static int touch_reset(struct syna_tcm_hcd *tcm_hcd)
 		}
 	}
 
+	LOG_DONE();
 	return 0;
 }
 
 static int touch_early_suspend(struct syna_tcm_hcd *tcm_hcd)
 {
+	LOG_ENTRY();
 	if (!touch_hcd)
 		return 0;
 
-#ifdef WAKEUP_GESTURE
-	touch_hcd->suspend_touch = false;
-#else
 	touch_hcd->suspend_touch = true;
-#endif
 
 	touch_free_objects();
 
+	LOG_DONE();
 	return 0;
 }
 
 static int touch_suspend(struct syna_tcm_hcd *tcm_hcd)
 {
-#ifdef WAKEUP_GESTURE
 	int retval;
-#endif
 
+	LOG_ENTRY();
 	if (!touch_hcd)
 		return 0;
 
@@ -1189,54 +1249,54 @@ static int touch_suspend(struct syna_tcm_hcd *tcm_hcd)
 
 	touch_free_objects();
 
-#ifdef WAKEUP_GESTURE
-	if (!touch_hcd->irq_wake) {
-		enable_irq_wake(tcm_hcd->irq);
-		touch_hcd->irq_wake = true;
+	if (synaptics_gesture_enable_flag) {
+		touch_hcd->suspend_touch = false;
+		if (!touch_hcd->irq_wake) {
+			enable_irq_wake(tcm_hcd->irq);
+			touch_hcd->irq_wake = true;
+		}
+
+		retval = tcm_hcd->set_dynamic_config(tcm_hcd,
+				DC_IN_WAKEUP_GESTURE_MODE,
+				1);
+		if (retval < 0) {
+			LOGE(tcm_hcd->pdev->dev.parent,
+					"Failed to enable wakeup gesture mode\n");
+			return retval;
+		}
 	}
 
-	touch_hcd->suspend_touch = false;
-
-	retval = tcm_hcd->set_dynamic_config(tcm_hcd,
-			DC_IN_WAKEUP_GESTURE_MODE,
-			1);
-	if (retval < 0) {
-		LOGE(tcm_hcd->pdev->dev.parent,
-				"Failed to enable wakeup gesture mode\n");
-		return retval;
-	}
-#endif
-
+	LOG_DONE();
 	return 0;
 }
 
 static int touch_resume(struct syna_tcm_hcd *tcm_hcd)
 {
-#ifdef WAKEUP_GESTURE
 	int retval;
-#endif
 
+	LOG_ENTRY();
 	if (!touch_hcd)
 		return 0;
 
 	touch_hcd->suspend_touch = false;
 
-#ifdef WAKEUP_GESTURE
-	if (touch_hcd->irq_wake) {
-		disable_irq_wake(tcm_hcd->irq);
-		touch_hcd->irq_wake = false;
+	if (synaptics_gesture_enable_flag) {
+		if (touch_hcd->irq_wake) {
+			disable_irq_wake(tcm_hcd->irq);
+			touch_hcd->irq_wake = false;
+		}
+
+		retval = tcm_hcd->set_dynamic_config(tcm_hcd,
+				DC_IN_WAKEUP_GESTURE_MODE,
+				0);
+		if (retval < 0) {
+			LOGE(tcm_hcd->pdev->dev.parent,
+					"Failed to disable wakeup gesture mode\n");
+			return retval;
+		}
 	}
 
-	retval = tcm_hcd->set_dynamic_config(tcm_hcd,
-			DC_IN_WAKEUP_GESTURE_MODE,
-			0);
-	if (retval < 0) {
-		LOGE(tcm_hcd->pdev->dev.parent,
-				"Failed to disable wakeup gesture mode\n");
-		return retval;
-	}
-#endif
-
+	LOG_DONE();
 	return 0;
 }
 
@@ -1254,14 +1314,26 @@ static struct syna_tcm_module_cb touch_module = {
 
 static int __init touch_module_init(void)
 {
-	return syna_tcm_add_module(&touch_module, true);
+	int retval;
+	LOG_ENTRY();
+	LOGV("__init touch module\n");
+	retval =  syna_tcm_add_module(&touch_module, true);
+	if(retval) {
+		LOGV("syna_tcm_add_module failed! retval = %d\n", retval);
+	}
+	LOG_DONE();
+	return retval;
 }
 
 static void __exit touch_module_exit(void)
 {
+	LOG_ENTRY();
 	syna_tcm_add_module(&touch_module, false);
 
 	wait_for_completion(&touch_remove_complete);
+
+	LOG_DONE();
+	return;
 }
 
 module_init(touch_module_init);
