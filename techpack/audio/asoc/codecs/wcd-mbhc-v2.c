@@ -871,7 +871,7 @@ void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
 		wcd_mbhc_report_plug(mbhc, 1, jack_type);
 	} else if (plug_type == MBHC_PLUG_TYPE_HIGH_HPH) {
 		if (mbhc->mbhc_cfg->detect_extn_cable) {
-#ifdef CONFIG_MACH_LONGCHEER
+#ifdef CONFIG_MACH_XIAOMI_LAVENDER
 			/*Add for selfie stick not work  tangshouxing 9/6*/
 			if (mbhc->impedance_detect) {
 				mbhc->mbhc_cb->compute_impedance(mbhc,
