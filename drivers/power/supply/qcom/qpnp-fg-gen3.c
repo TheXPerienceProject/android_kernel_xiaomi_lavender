@@ -903,14 +903,14 @@ static int fg_get_batt_profile(struct fg_dev *fg)
 
 #ifdef CONFIG_MACH_LONGCHEER
 	if (hwc_check_global)
-		chip->bp.fastchg_curr_ma = 2300;
+		fg->bp.fastchg_curr_ma = 2300;
 #ifdef CONFIG_MACH_XIAOMI_TULIP
 	else
 		if (is_poweroff_charge) {
 			if (hwc_check_india)
-				chip->bp.fastchg_curr_ma = 2200;
+				fg->bp.fastchg_curr_ma = 2200;
 			else
-				chip->bp.fastchg_curr_ma = 2300;
+				fg->bp.fastchg_curr_ma = 2300;
 		}
 #endif
 #endif
@@ -929,7 +929,7 @@ static int fg_get_batt_profile(struct fg_dev *fg)
 	}
 
 #ifdef CONFIG_MACH_LONGCHEER
-	rc = of_property_read_u32(profile_node, "qcom,battery-full-design", &chip->battery_full_design);
+	rc = of_property_read_u32(profile_node, "qcom,battery-full-design", &fg->battery_full_design);
 	if (rc < 0) {
 		pr_err("No profile data available\n");
 		return -ENODATA;
@@ -2724,14 +2724,14 @@ static void status_change_work(struct work_struct *work)
 	fg_cap_learning_update(fg);
 
 #if defined(CONFIG_MACH_XIAOMI_LAVENDER) || defined(CONFIG_MACH_XIAOMI_WAYNE)
-	if (chip->charge_done && !chip->report_full) {
-		chip->report_full = true;
-	} else if (!chip->charge_done && chip->report_full) {
-		rc = fg_get_msoc_raw(chip, &msoc);
+	if (fg->charge_done && !fg->report_full) {
+		fg->report_full = true;
+	} else if (!fg->charge_done && fg->report_full) {
+		rc = fg_get_msoc_raw(fg, &msoc);
 		if (rc < 0)
 			pr_err("Error in getting msoc, rc=%d\n", rc);
 		if (msoc < FULL_SOC_REPORT_THR - 4)
-			chip->report_full = false;
+			fg->report_full = false;
 	}
 #endif
 
@@ -3854,7 +3854,7 @@ static int fg_psy_get_property(struct power_supply *psy,
 
 #ifdef CONFIG_MACH_XIAOMI_TULIP
 #define BCL_RESET_RETRY_COUNT 4
-static int fg_bcl_reset(struct fg_chip *chip)
+static int fg_bcl_reset(struct fg_dev *chip)
 {
 	int i, ret, rc = 0;
 	u8 val, peek_mux;
@@ -4485,7 +4485,7 @@ static int fg_hw_init(struct fg_dev *fg)
 #ifdef CONFIG_MACH_LONGCHEER
 	buf[0] = 0x33;
 	buf[1] = 0x3;
-	rc = fg_sram_write(chip, 4, 0, buf, 2, FG_IMA_DEFAULT);
+	rc = fg_sram_write(fg, 4, 0, buf, 2, FG_IMA_DEFAULT);
 	if (rc < 0)
 		pr_err("Error in configuring Sram, rc = %d\n", rc);
 #endif
@@ -4730,17 +4730,17 @@ static irqreturn_t fg_delta_msoc_irq_handler(int irq, void *data)
 		power_supply_changed(fg->batt_psy);
 
 #ifdef CONFIG_MACH_LONGCHEER
-	input_present = is_input_present(chip);
+	input_present = is_input_present(fg);
 	quiet_them = thermal_zone_get_zone_by_name("quiet_therm");
-	rc = fg_get_battery_voltage(chip, &volt_uv);
+	rc = fg_get_battery_voltage(fg, &volt_uv);
 	if (!rc)
-		rc = fg_get_prop_capacity(chip, &msoc);
+		rc = fg_get_prop_capacity(fg, &msoc);
 	if (!rc)
-		rc = fg_get_battery_temp(chip, &batt_temp);
+		rc = fg_get_battery_temp(fg, &batt_temp);
 	if (quiet_them)
 		rc = thermal_zone_get_temp(quiet_them, &temp_qt);
 	if (!rc)
-		rc = fg_get_battery_current(chip, &ibatt_now);
+		rc = fg_get_battery_current(fg, &ibatt_now);
 #endif
 
 	return IRQ_HANDLED;

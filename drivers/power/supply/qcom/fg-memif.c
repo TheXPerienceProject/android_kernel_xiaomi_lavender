@@ -794,7 +794,7 @@ out:
 }
 
 #ifdef CONFIG_MACH_XIAOMI_TULIP
-int fg_dma_mem_req(struct fg_chip *chip, bool request)
+int fg_dma_mem_req(struct fg_dev *chip, bool request)
 {
 	int ret, rc = 0, retry_count  = RETRY_COUNT;
 	u8 val;

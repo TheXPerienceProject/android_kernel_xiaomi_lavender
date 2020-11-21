@@ -2173,7 +2173,7 @@ int smblib_get_prop_from_bms(struct smb_charger *chg,
 int smblib_get_prop_battery_full_design(struct smb_charger *chg,
 					union power_supply_propval *val)
 {
-	struct fg_chip *chip;
+	struct fg_dev *chip;
 
 	if (!chg->bms_psy)
 		return -EINVAL;

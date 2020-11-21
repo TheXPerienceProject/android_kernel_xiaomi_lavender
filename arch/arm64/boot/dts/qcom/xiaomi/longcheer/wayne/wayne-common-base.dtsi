@@ -26,12 +26,7 @@
 				0x00 0x18>;
 };
 
-/*
-//msm-pm660.dtsi wayne specific diff
-&pm660_coincell {
-	qcom,charge-enable = <0>;
-};
-*/
+/* msm-pm660.dtsi wayne specific diff */
 
 &pm660_charger {
 	qcom,usb-icl-ua = <2900000>;

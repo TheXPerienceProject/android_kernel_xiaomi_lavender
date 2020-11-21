@@ -623,6 +623,6 @@ extern int fg_lerp(const struct fg_pt *pts, size_t tablesize, s32 input,
 void fg_stay_awake(struct fg_dev *fg, int awake_reason);
 void fg_relax(struct fg_dev *fg, int awake_reason);
 #ifdef CONFIG_MACH_XIAOMI_TULIP
-extern int fg_dma_mem_req(struct fg_chip *, bool);
+extern int fg_dma_mem_req(struct fg_dev *, bool);
 #endif
 #endif
