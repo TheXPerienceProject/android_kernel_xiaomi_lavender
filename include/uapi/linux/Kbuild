@@ -20,6 +20,8 @@ header-y += sockev.h
 header-y += nfc/
 header-y += seemp_api.h
 header-y += seemp_param_id.h
+header-y += msm_vidc_dec.h
+header-y += msm_vidc_enc.h
 
 ifneq ($(VSERVICES_SUPPORT), "")
 include include/linux/Kbuild.vservices
