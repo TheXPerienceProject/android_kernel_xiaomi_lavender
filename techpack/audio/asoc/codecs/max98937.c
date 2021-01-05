@@ -2691,6 +2691,7 @@ static int max98927_probe(struct snd_soc_component *component)
 
 	pr_info("%s: enter\n", __func__);
 
+	max98927->component = component;
 	snd_soc_dapm_ignore_suspend(dapm, "MAX98927_OUT");
 	snd_soc_dapm_ignore_suspend(dapm, "MAX98927_IN");
 	snd_soc_dapm_ignore_suspend(dapm, "HiFi Playback");
@@ -2702,7 +2703,7 @@ static int max98927_probe(struct snd_soc_component *component)
 }
 
 static const struct snd_soc_component_driver soc_component_dev_max98927 = {
-	.probe			  = max98927_probe,
+		.probe		  = max98927_probe,
 		.dapm_routes	  = max98927_audio_map,
 		.num_dapm_routes  = ARRAY_SIZE(max98927_audio_map),
 		.dapm_widgets     = max98927_dapm_widgets,
