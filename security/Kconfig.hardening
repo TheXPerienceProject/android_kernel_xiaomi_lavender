@@ -78,6 +78,7 @@ choice
 	config INIT_STACK_ALL_ZERO
 		bool "zero-init everything on the stack (strongest and safest)"
 		depends on CC_HAS_AUTO_VAR_INIT_ZERO
+		default y
 		help
 		  Initializes everything on the stack with a zero
 		  value. This is intended to eliminate all classes
