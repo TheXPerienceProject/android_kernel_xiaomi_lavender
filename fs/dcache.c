@@ -2693,7 +2693,6 @@ static void copy_name(struct dentry *dentry, struct dentry *target)
 		kfree_rcu(old_name, u.head);
 }
 
-
 /*
  * __d_move - move a dentry
  * @dentry: entry to move
