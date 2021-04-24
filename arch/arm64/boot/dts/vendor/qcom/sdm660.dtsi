@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2020 The XPerience Project
+ */
 #include "skeleton64.dtsi"
 #include <dt-bindings/clock/qcom,gcc-sdm660.h>
 #include <dt-bindings/clock/qcom,gpu-sdm660.h>
@@ -718,7 +721,7 @@
 			compatible = "qcom,memshare-peripheral";
 			qcom,peripheral-size = <0x200000>;
 			qcom,client-id = <0>;
-			qcom,allocate-boot-time;
+			qcom,allocate-on-request;
 			label = "modem";
 		};
 
